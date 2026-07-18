@@ -1,0 +1,125 @@
+-- Advanced DAX Measures Repository
+-- Designed for the Enterprise Customer Behavior Dashboard
+
+--------------------------------------------------------------------------------
+-- 1. CORE SALES METRICS
+--------------------------------------------------------------------------------
+
+-- Total Revenue
+Total Revenue = SUM('fact_purchases'[purchase_amount])
+
+-- Total Order Volume
+Order Count = COUNTROWS('fact_purchases')
+
+-- Average Order Value (AOV)
+AOV = DIVIDE([Total Revenue], [Order Count], 0)
+
+-- Promotion-Driven Sales Ratio (Monetary impact of discounts)
+Promo Sales Ratio = 
+DIVIDE(
+    CALCULATE([Total Revenue], 'fact_purchases'[discount_applied] = TRUE),
+    [Total Revenue],
+    0
+)
+
+
+--------------------------------------------------------------------------------
+-- 2. CUSTOMER METRICS & UNIT ECONOMICS
+--------------------------------------------------------------------------------
+
+-- Total Customer Lifetime Value (CLV Portfolio)
+Total CLV Portfolio = SUM('fact_purchases'[estimated_clv])
+
+-- Average CLV per Customer
+Average CLV = AVERAGE('fact_purchases'[estimated_clv])
+
+-- Repeat Purchase Rate (RPR)
+-- Percentage of customers who have bought more than once historically
+Repeat Purchase Rate = 
+VAR RepeatCustomers = CALCULATE(DISTINCTCOUNT('fact_purchases'[customer_id]), 'fact_purchases'[previous_purchases] > 0)
+VAR TotalCustomers = DISTINCTCOUNT('fact_purchases'[customer_id])
+RETURN
+DIVIDE(RepeatCustomers, TotalCustomers, 0)
+
+
+--------------------------------------------------------------------------------
+-- 3. CUSTOMER SATISFACTION (NPS PROXY)
+--------------------------------------------------------------------------------
+
+-- Net Promoter Score Proxy
+-- Promoters (Ratings 4-5) - Detractors (Ratings 1-3) / Total
+NPS Proxy = 
+VAR TotalRatings = COUNTROWS('fact_purchases')
+VAR Promoters = CALCULATE(COUNTROWS('fact_purchases'), 'fact_purchases'[review_rating] >= 4.0)
+VAR Detractors = CALCULATE(COUNTROWS('fact_purchases'), 'fact_purchases'[review_rating] <= 3.0)
+RETURN
+DIVIDE(Promoters - Detractors, TotalRatings, 0)
+
+
+--------------------------------------------------------------------------------
+-- 4. STATISTICAL & MOVING AVERAGE METRICS
+--------------------------------------------------------------------------------
+
+-- Running Total Sales
+-- Computes the running total based on the purchase index
+Running Total Sales = 
+CALCULATE(
+    [Total Revenue],
+    FILTER(
+        ALLSELECTED('fact_purchases'),
+        'fact_purchases'[purchase_id] <= MAX('fact_purchases'[purchase_id])
+    )
+)
+
+-- 3-Month Order-based Moving Average (Smoothing purchase amount trends)
+-- Since we do not have date dimensions, we smooth over order ranges using purchase_id
+AOV 100-Order Moving Average = 
+VAR CurrentId = MAX('fact_purchases'[purchase_id])
+RETURN
+CALCULATE(
+    [AOV],
+    FILTER(
+        ALL('fact_purchases'),
+        'fact_purchases'[purchase_id] >= CurrentId - 100 &&
+        'fact_purchases'[purchase_id] <= CurrentId
+    )
+)
+
+
+--------------------------------------------------------------------------------
+-- 5. RANKING & TOP N
+--------------------------------------------------------------------------------
+
+-- Product Category Rank
+Category Sales Rank = 
+RANKX(
+    ALL('dim_products'[category]),
+    [Total Revenue],
+    ,
+    DESC,
+    Skip
+)
+
+-- Dynamic Sales target margin check
+Sales Status Color = 
+IF([Total Revenue] > 50000, "#107C41", "#C8102E") -- Green if over target, Red otherwise
+
+
+--------------------------------------------------------------------------------
+-- 6. DYNAMIC UI HEADERS & FORMATTING
+--------------------------------------------------------------------------------
+
+-- Dynamic Title for Executive Overview Page
+Dynamic Executive Title = 
+"Executive Financial Summary - " & 
+IF(
+    ISFILTERED('dim_customers'[gender]),
+    SELECTEDVALUE('dim_customers'[gender]),
+    "All Genders"
+) & 
+" | Season: " & 
+IF(
+    ISFILTERED('fact_purchases'[season]),
+    SELECTEDVALUE('fact_purchases'[season]),
+    "All Seasons"
+)
